@@ -4,22 +4,6 @@ module DifferentialDynamicsModels
 
 using StaticArrays
 using LinearAlgebra
-macro maintain_type(expr)    # ensures that subtypes of StaticArrays.FieldVector maintain their type upon manipulation
-    full_name = expr.args[2].args[1]                                     # MyType{T} or MyType
-    short_name = full_name isa Symbol ? full_name : full_name.args[1]    # MyType
-    @assert expr.args[2].args[2].args[1] == :FieldVector "@maintain_type is defined only for subtypes of FieldVector"
-    N = expr.args[2].args[2].args[2]                                     # N in FieldVector{N,T}
-    T = expr.args[2].args[2].args[3]                                     # T in FieldVector{N,T}
-    st_method = if short_name == full_name
-        :(StaticArrays.similar_type(::Type{$short_name}, ::Type{$T}, s::Size{($N,)}) = $short_name)
-    else
-        :(StaticArrays.similar_type(::Type{<:$short_name}, ::Type{$T}, s::Size{($N,)}) where {$T} = $full_name)
-    end
-    quote
-        $(esc(expr))
-        $(esc(st_method))
-    end
-end
 
 export @maintain_type
 export AbstractState, State, AbstractControl, Control, DifferentialDynamics, CostFunctional
@@ -33,6 +17,8 @@ import Base: zero
 import LinearAlgebra: issymmetric
 export issymmetric
 
+include("utils.jl")
+
 # States, Controls, Dynamics, and Cost Functionals
 abstract type AbstractState end
 const State = Union{AbstractState, AbstractVector}
@@ -41,8 +27,8 @@ const Control = Union{AbstractControl, AbstractVector}
 abstract type DifferentialDynamics end
 abstract type CostFunctional end
 struct Time <: CostFunctional end
-struct TimePlusQuadraticControl{Du,T,DuDu} <: CostFunctional
-    R::SMatrix{Du,Du,T,DuDu}
+struct TimePlusQuadraticControl{Du,TR<:SMatrix{Du,Du}} <: CostFunctional
+    R::TR
 end
 
 # State/Control Sequences
@@ -130,32 +116,6 @@ function waypoints(f::DifferentialDynamics, x::State, c::Union{ControlInterval, 
 end
 
 # Control Intervals
-function propagate_heun(fn, y0, Tf, Ti=zero(Tf), N=10)
-    dt = (Tf - Ti)/N
-    y = y0
-    t = Ti
-    for i in 1:N
-        k1 = dt*fn(y, t)
-        k2 = dt*fn(y + k1, t + dt)
-        y = y + (k1 + k2)/2
-        t = t + dt
-    end
-    y
-end
-function propagate_rk4(fn, y0, Tf, Ti=zero(Tf), N=10)
-    dt = (Tf - Ti)/N
-    y = y0
-    t = Ti
-    for i in 1:N
-        k1 = dt*fn(y, t)
-        k2 = dt*fn(y + k1/2, t + dt/2)
-        k3 = dt*fn(y + k2/2, t + dt/2)
-        k4 = dt*fn(y + k3, t + dt)
-        y = y + (k1 + 2*k2 + 2*k3 + k4)/6
-        t = t + dt
-    end
-    y
-end
 function propagate_ODE(f::DifferentialDynamics, x::State, c::ControlInterval, N=10)
     c.t > 0 ? propagate_rk4((y,t) -> f(y, instantaneous_control(c, t)), x, c.t, zero(c.t), N) :
               propagate_rk4((y,t) -> -f(y, instantaneous_control(c, -t)), x, -c.t, zero(c.t), N)
@@ -163,10 +123,12 @@ end
 propagate(f::DifferentialDynamics, x::State, c::ControlInterval) = propagate_ODE(f, x, c)    # general fallback
 
 ## Step Control
-struct StepControl{N,T,S<:StaticVector{N,T}} <: ControlInterval
+struct StepControl{N,T,S<:StaticVector{N}} <: ControlInterval
     t::T
     u::S
-    (::Type{SC})(t::T, u::S) where {N,T,S<:StaticVector{N,T},SC<:StepControl} = new{N,T,S}(t, u)
+    function (::Type{SC})(t::T, u::S) where {N,T,S<:StaticVector{N},SC<:StepControl}
+        new{N,T,S}(t, u)
+    end
 end
 const ZeroOrderHoldControl{N,T,S} = StepControl{N,T,S}
 duration(c::StepControl) = c.t
@@ -179,15 +141,17 @@ end
 instantaneous_control(c::StepControl, s::Number) = c.u
 
 ## Ramp Control
-struct RampControl{N,T,S<:StaticVector{N,T}} <: ControlInterval
+struct RampControl{N,T,S0<:StaticVector{N},Sf<:StaticVector{N}} <: ControlInterval
     t::T
-    u0::S
-    uf::S
-    (::Type{RC})(t::T, u0::S, uf::S) where {N,T,S<:StaticVector{N,T},RC<:RampControl} = new{N,T,S}(t, u0, uf)
+    u0::S0
+    uf::Sf
+    function (::Type{RC})(t::T, u0::S0, uf::Sf) where {N,T,S0<:StaticVector{N},Sf<:StaticVector{N},RC<:RampControl}
+        new{N,T,S0,Sf}(t, u0, uf)
+    end
 end
-const FirstOrderHoldControl{N,T,S} = RampControl{N,T,S}
+const FirstOrderHoldControl{N,T,S0,Sf} = RampControl{N,T,S0,Sf}
 duration(c::RampControl) = c.t
-zero(x::Type{RampControl{N,T,S}}) where {N,T,S} = RampControl(T(0), zeros(S), zeros(S))
+zero(x::Type{RampControl{N,T,S0,Sf}}) where {N,T,S0,Sf} = RampControl(T(0), zeros(S0), zeros(Sf))
 function propagate(f::DifferentialDynamics, x::State, c::RampControl, s::Number)
     s <= 0           ? x :
     s >= duration(c) ? propagate(f, x, c) :
@@ -196,10 +160,10 @@ end
 instantaneous_control(c::RampControl, s::Number) = c.u0 + (s/c.t)*(c.uf - c.u0)
 
 ## BVP Control
-struct BVPControl{T,S<:State,Fx<:Function,Fu<:Function} <: ControlInterval
+struct BVPControl{T,S0<:State,Sf<:State,Fx<:Function,Fu<:Function} <: ControlInterval
     t::T
-    x0::S
-    xf::S
+    x0::S0
+    xf::Sf
     x::Fx
     u::Fu
 end
@@ -212,6 +176,11 @@ instantaneous_control(f::DifferentialDynamics, x::State, c::BVPControl, s::Numbe
 abstract type SteeringConstraints end
 abstract type SteeringCache end
 struct EmptySteeringConstraints <: SteeringConstraints end
+struct BoundedControlNorm{P,T} <: SteeringConstraints
+    b::T
+end
+BoundedControlNorm(b::T=1) where {T} = BoundedControlNorm{2,T}(b)
+BoundedControlNorm{P}(b::T) where {P,T} = BoundedControlNorm{P,T}(b)
 struct EmptySteeringCache <: SteeringCache end
 struct SteeringBVP{D<:DifferentialDynamics,C<:CostFunctional,SC<:SteeringConstraints,SD<:SteeringCache}
     dynamics::D
@@ -229,22 +198,17 @@ issymmetric(bvp::SteeringBVP) = false                                         # 
 
 # Single Integrator
 struct SingleIntegratorDynamics{N} <: DifferentialDynamics end
-struct BoundedControlNorm{P,T} <: SteeringConstraints
-    b::T
-end
-BoundedControlNorm(b::T=1.0) where {T} = BoundedControlNorm{2,T}(b)
-BoundedControlNorm{P}(b::T) where {P,T} = BoundedControlNorm{P,T}(b)
 
 state_dim(::SingleIntegratorDynamics{N}) where {N} = N
 control_dim(::SingleIntegratorDynamics{N}) where {N} = N
 
+(::SingleIntegratorDynamics{N})(x::StaticVector{N}, u::StaticVector{N}) where {N} = u
 function propagate(f::SingleIntegratorDynamics{N}, x::StaticVector{N}, c::StepControl{N}) where {N}
     x + c.t*c.u
 end
 function propagate(f::SingleIntegratorDynamics{N}, x::StaticVector{N}, c::RampControl{N}) where {N}
     x + c.t*(c.u0 + c.uf)/2
 end
-(::SingleIntegratorDynamics{N})(x::StaticVector{N}, u::StaticVector{N}) where {N} = u
 
 issymmetric(bvp::SteeringBVP{<:SingleIntegratorDynamics,<:CostFunctional,<:BoundedControlNorm}) = true
 function (bvp::SteeringBVP{SingleIntegratorDynamics{N},Time,<:BoundedControlNorm{2}})(x0::StaticVector{N},
