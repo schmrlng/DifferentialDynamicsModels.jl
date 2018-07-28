@@ -15,7 +15,7 @@ macro maintain_type(expr)    # ensures that subtypes of StaticArrays.FieldVector
     end
 end
 
-function propagate_heun(fn, y0, Tf, Ti=zero(Tf), N=10)
+function ode_heun(fn, y0, Tf, Ti=zero(Tf), N=10)
     dt = (Tf - Ti)/N
     y = y0
     t = Ti
@@ -28,7 +28,7 @@ function propagate_heun(fn, y0, Tf, Ti=zero(Tf), N=10)
     y
 end
 
-function propagate_rk4(fn, y0, Tf, Ti=zero(Tf), N=10)
+function ode_rk4(fn, y0, Tf, Ti=zero(Tf), N=10)
     dt = (Tf - Ti)/N
     y = y0
     t = Ti

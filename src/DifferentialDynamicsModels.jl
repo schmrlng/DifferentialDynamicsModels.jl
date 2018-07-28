@@ -2,8 +2,8 @@ __precompile__()
 
 module DifferentialDynamicsModels
 
-using StaticArrays
 using LinearAlgebra
+using StaticArrays
 
 export @maintain_type
 export AbstractState, State, AbstractControl, Control, DifferentialDynamics, CostFunctional
@@ -116,11 +116,11 @@ function waypoints(f::DifferentialDynamics, x::State, c::Union{ControlInterval, 
 end
 
 # Control Intervals
-function propagate_ODE(f::DifferentialDynamics, x::State, c::ControlInterval, N=10)
-    c.t > 0 ? propagate_rk4((y,t) -> f(y, instantaneous_control(c, t)), x, c.t, zero(c.t), N) :
-              propagate_rk4((y,t) -> -f(y, instantaneous_control(c, -t)), x, -c.t, zero(c.t), N)
+function propagate_ode(f::DifferentialDynamics, x::State, c::ControlInterval, s::Number=duration(c); N=10)
+    s > 0 ? ode_rk4((y,t) -> f(y, instantaneous_control(c, t)), x, s, zero(s), N) :
+            ode_rk4((y,t) -> -f(y, instantaneous_control(c, -t)), x, -s, zero(s), N)
 end
-propagate(f::DifferentialDynamics, x::State, c::ControlInterval) = propagate_ODE(f, x, c)    # general fallback
+propagate(f::DifferentialDynamics, x::State, c::ControlInterval) = propagate_ode(f, x, c)    # general fallback
 
 ## Step Control
 struct StepControl{N,T,S<:StaticVector{N}} <: ControlInterval
@@ -150,6 +150,7 @@ struct RampControl{N,T,S0<:StaticVector{N},Sf<:StaticVector{N}} <: ControlInterv
     end
 end
 const FirstOrderHoldControl{N,T,S0,Sf} = RampControl{N,T,S0,Sf}
+RampControl(c::StepControl) = RampControl(c.t, c.u, c.u)
 duration(c::RampControl) = c.t
 zero(x::Type{RampControl{N,T,S0,Sf}}) where {N,T,S0,Sf} = RampControl(T(0), zeros(S0), zeros(Sf))
 function propagate(f::DifferentialDynamics, x::State, c::RampControl, s::Number)
@@ -203,19 +204,15 @@ state_dim(::SingleIntegratorDynamics{N}) where {N} = N
 control_dim(::SingleIntegratorDynamics{N}) where {N} = N
 
 (::SingleIntegratorDynamics{N})(x::StaticVector{N}, u::StaticVector{N}) where {N} = u
-function propagate(f::SingleIntegratorDynamics{N}, x::StaticVector{N}, c::StepControl{N}) where {N}
-    x + c.t*c.u
-end
-function propagate(f::SingleIntegratorDynamics{N}, x::StaticVector{N}, c::RampControl{N}) where {N}
-    x + c.t*(c.u0 + c.uf)/2
-end
+propagate(f::SingleIntegratorDynamics{N}, x::StaticVector{N}, c::StepControl{N}) where {N} = x + c.t*c.u
+propagate(f::SingleIntegratorDynamics{N}, x::StaticVector{N}, c::RampControl{N}) where {N} = x + c.t*(c.u0 + c.uf)/2
 
 issymmetric(bvp::SteeringBVP{<:SingleIntegratorDynamics,<:CostFunctional,<:BoundedControlNorm}) = true
 function (bvp::SteeringBVP{SingleIntegratorDynamics{N},Time,<:BoundedControlNorm{2}})(x0::StaticVector{N},
                                                                                       xf::StaticVector{N}) where {N}
     c = norm(xf - x0)/bvp.constraints.b
     ctrl = StepControl(c, SVector((xf - x0)/c))    # convert to SVector otherwise control will maintain State type
-    return (cost=c, controls=ctrl)
+    (cost=c, controls=ctrl)
 end
 
 end # module

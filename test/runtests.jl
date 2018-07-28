@@ -39,4 +39,4 @@ c2 = StepControl(.5, rand(SVector{2,Float64}))
 @test propagate(SI, x0, [c1, c2]) == x0 + 0.5*c1.u + 0.5*c2.u
 
 rc = RampControl(.5, rand(SVector{2,Float64}), rand(SVector{2,Float64}))
-@test propagate(SI, x0, rc) ≈ DifferentialDynamicsModels.propagate_ODE(SI, x0, rc)
+@test propagate(SI, x0, rc) ≈ DifferentialDynamicsModels.propagate_ode(SI, x0, rc)
