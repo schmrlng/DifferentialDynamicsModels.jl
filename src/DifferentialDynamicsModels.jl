@@ -171,7 +171,7 @@ end
 duration(c::BVPControl) = c.t
 propagate(f::DifferentialDynamics, x::State, c::BVPControl) = (x - c.x0) + c.xf
 propagate(f::DifferentialDynamics, x::State, c::BVPControl, s::Number) = (x - c.x0) + c.x(c.x0, c.xf, c.t, s)
-instantaneous_control(f::DifferentialDynamics, x::State, c::BVPControl, s::Number) = c.u(c.x0, c.xf, c.t, s)
+instantaneous_control(c::BVPControl, s::Number) = c.u(c.x0, c.xf, c.t, s)
 
 # Steering Two-Point Boundary Value Problems (BVPs)
 abstract type SteeringConstraints end
