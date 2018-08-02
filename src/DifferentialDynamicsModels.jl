@@ -1,5 +1,3 @@
-__precompile__()
-
 module DifferentialDynamicsModels
 
 using LinearAlgebra
@@ -13,7 +11,7 @@ export StepControl, RampControl, BVPControl
 export SteeringBVP, SteeringConstraints, SteeringCache, EmptySteeringConstraints, EmptySteeringCache
 export SingleIntegratorDynamics, BoundedControlNorm
 export state_dim, control_dim, duration, propagate, instantaneous_control, waypoints
-import Base: zero
+import Base: zero, getindex
 import LinearAlgebra: issymmetric
 export issymmetric
 
@@ -133,6 +131,7 @@ end
 const ZeroOrderHoldControl{N,T,S} = StepControl{N,T,S}
 duration(c::StepControl) = c.t
 zero(x::Type{StepControl{N,T,S}}) where {N,T,S} = StepControl(T(0), zeros(S))
+getindex(c::StepControl, i) = StepControl(c.t, c.u[i])
 function propagate(f::DifferentialDynamics, x::State, c::StepControl, s::Number)
     s <= 0           ? x :
     s >= duration(c) ? propagate(f, x, c) :
@@ -153,6 +152,7 @@ const FirstOrderHoldControl{N,T,S0,Sf} = RampControl{N,T,S0,Sf}
 RampControl(c::StepControl) = RampControl(c.t, c.u, c.u)
 duration(c::RampControl) = c.t
 zero(x::Type{RampControl{N,T,S0,Sf}}) where {N,T,S0,Sf} = RampControl(T(0), zeros(S0), zeros(Sf))
+getindex(c::RampControl, i) = RampControl(c.t, c.u0[i], c.uf[i])
 function propagate(f::DifferentialDynamics, x::State, c::RampControl, s::Number)
     s <= 0           ? x :
     s >= duration(c) ? propagate(f, x, c) :
