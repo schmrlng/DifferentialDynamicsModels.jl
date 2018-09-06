@@ -19,9 +19,9 @@ include("utils.jl")
 
 # States, Controls, Dynamics, and Cost Functionals
 abstract type AbstractState end
-const State = Union{AbstractState, AbstractVector}
+const State = Union{AbstractState, AbstractVector{<:Number}}
 abstract type AbstractControl end
-const Control = Union{AbstractControl, AbstractVector}
+const Control = Union{AbstractControl, AbstractVector{<:Number}}
 abstract type DifferentialDynamics end
 abstract type CostFunctional end
 struct Time <: CostFunctional end
