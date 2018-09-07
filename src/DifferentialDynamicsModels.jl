@@ -211,7 +211,7 @@ issymmetric(bvp::SteeringBVP{<:SingleIntegratorDynamics,<:CostFunctional,<:Bound
 function (bvp::SteeringBVP{SingleIntegratorDynamics{N},Time,<:BoundedControlNorm{2}})(x0::StaticVector{N},
                                                                                       xf::StaticVector{N}) where {N}
     c = norm(xf - x0)/bvp.constraints.b
-    ctrl = StepControl(c, SVector((xf - x0)/c))    # convert to SVector otherwise control will maintain State type
+    ctrl = StepControl(c, SVector((xf - x0)*(c > 0 ? inv(c) : 0)))    # @benchmark appears faster than ifelse
     (cost=c, controls=ctrl)
 end
 
