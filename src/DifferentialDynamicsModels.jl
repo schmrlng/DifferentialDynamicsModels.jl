@@ -9,7 +9,7 @@ export Time, TimePlusQuadraticControl
 export StateSequence, ControlInterval, ControlSequence
 export StepControl, RampControl, BVPControl
 export SteeringBVP, SteeringConstraints, SteeringCache, EmptySteeringConstraints, EmptySteeringCache
-export SingleIntegratorDynamics, BoundedControlNorm
+export SingleIntegratorDynamics, BoundedControlNorm, SingleIntegratorSteering, GeometricSteering
 export state_dim, control_dim, duration, propagate, instantaneous_control, waypoints
 import Base: zero, getindex
 import LinearAlgebra: issymmetric
@@ -208,8 +208,11 @@ propagate(f::SingleIntegratorDynamics{N}, x::StaticVector{N}, c::StepControl{N})
 propagate(f::SingleIntegratorDynamics{N}, x::StaticVector{N}, c::RampControl{N}) where {N} = x + c.t*(c.u0 + c.uf)/2
 
 issymmetric(bvp::SteeringBVP{<:SingleIntegratorDynamics,<:CostFunctional,<:BoundedControlNorm}) = true
-function (bvp::SteeringBVP{SingleIntegratorDynamics{N},Time,<:BoundedControlNorm{2}})(x0::StaticVector{N},
-                                                                                      xf::StaticVector{N}) where {N}
+const GeometricSteering{N,T} = SteeringBVP{SingleIntegratorDynamics{N},Time,BoundedControlNorm{2,T}}
+const SingleIntegratorSteering{N,T} = GeometricSteering{N,T}
+GeometricSteering{N}(b=1) where {N} = SteeringBVP(SingleIntegratorDynamics{N}(), Time(), constraints=BoundedControlNorm(b))
+GeometricSteering(N, b=1) = GeometricSteering{N}(b)
+function (bvp::GeometricSteering{N})(x0::StaticVector{N}, xf::StaticVector{N}) where {N}
     c = norm(xf - x0)/bvp.constraints.b
     ctrl = StepControl(c, SVector((xf - x0)*(c > 0 ? inv(c) : 0)))    # @benchmark appears faster than ifelse
     (cost=c, controls=ctrl)
