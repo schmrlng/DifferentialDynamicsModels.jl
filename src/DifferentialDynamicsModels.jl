@@ -10,9 +10,8 @@ export StateSequence, ControlInterval, ControlSequence
 export StepControl, RampControl, BVPControl
 export SteeringBVP, SteeringConstraints, SteeringCache, EmptySteeringConstraints, EmptySteeringCache
 export SingleIntegratorDynamics, BoundedControlNorm, SingleIntegratorSteering, GeometricSteering
-export state_dim, control_dim, duration, propagate, instantaneous_control, waypoints
-import Base: zero, getindex
-import LinearAlgebra: issymmetric
+export state_dim, control_dim, duration
+export Propagate, InstantaneousControl, propagate, instantaneous_control, waypoints, waypoints_itr
 export issymmetric
 
 include("utils.jl")
@@ -34,84 +33,27 @@ const StateSequence{S} = AbstractVector{S} where {S<:State}
 abstract type ControlInterval end
 const ControlSequence{CI} = AbstractVector{CI} where {CI<:ControlInterval}
 duration(cs::ControlSequence) = sum(duration(c) for c in cs)
-zero(::CI) where {CI<:ControlInterval} = zero(CI)
+Base.zero(::CI) where {CI<:ControlInterval} = zero(CI)
+
+include("iterators.jl")
 
 ## Propagation (state as a function of time)
-propagate(f::DifferentialDynamics, x::State, cs::ControlSequence) = foldl((x,c) -> propagate(f,x,c), cs, init=x)
-propagate(f::DifferentialDynamics, x::State, c::ControlInterval, ss) = map(s -> propagate(f, x, c, s), ss)
-function propagate(f::DifferentialDynamics, x::State, cs::ControlSequence, s::Number)
-    s <= 0 && return x
-    t = zero(s)
-    for c in cs
-        if s >= t + duration(c)
-            x = propagate(f, x, c)
-            t += duration(c)
-        else
-            return propagate(f, x, c, s-t)
-        end
-    end
-    x
-end
-function propagate(f::DifferentialDynamics, x::State, cs::ControlSequence, ss)
-    tf = duration(cs)
-    path = typeof(x)[]
-    prev_s, t, i = zero(tf), zero(tf), 1
-    for s in ss
-        s = clamp(s, zero(tf), tf)
-        @assert s >= prev_s "Input times must be sorted."
-        @inbounds c = cs[i]
-        while s >= t + duration(c) && i < length(cs)    # second clause necessary because of numerical error
-            x = propagate(f, x, c)
-            t += duration(c)
-            i += 1
-            @inbounds c = cs[i]
-        end
-        push!(path, propagate(f, x, c, s-t))
-        prev_s = s
-    end
-    path
-end
+propagate(f::DifferentialDynamics, x::State, cs::ControlSequence) = foldl((x, c) -> propagate(f, x, c), cs, init=x)
+propagate(f::DifferentialDynamics, x::State, cs, s::Number) = first(Propagate(f, x, cs, s))
+propagate(f::DifferentialDynamics, x::State, cs, ss) = collect(Propagate(f, x, cs, ss))
 
 ## Instantaneous Controls (control as a function of time)
-instantaneous_control(c::ControlInterval, ss) = map(s -> instantaneous_control(c, s), ss)
-function instantaneous_control(cs::ControlSequence, s::Number)
-    s <= 0 && return instantaneous_control(cs[1], zero(s))
-    t = zero(s)
-    for c in cs
-        if s >= t + duration(c)
-            t += duration(c)
-        else
-            return instantaneous_control(c, s-t)
-        end
-    end
-    instantaneous_control(c[end], duration(c[end]))
-end
-function instantaneous_control(cs::ControlSequence, ss)
-    tf = duration(cs)
-    ics = typeof(instantaneous_control(cs[1], zero(tf)))[]
-    prev_s, t, i = zero(tf), zero(tf), 1
-    for s in ss
-        s = clamp(s, zero(tf), tf)
-        @assert s >= prev_s "Input times must be sorted."
-        @inbounds c = cs[i]
-        while s >= t + duration(c) && i < length(cs)    # second clause necessary because of numerical error
-            t += duration(c)
-            i += 1
-            @inbounds c = cs[i]
-        end
-        push!(ics, instantaneous_control(c, s-t))
-        prev_s = s
-    end
-    ics
-end
+instantaneous_control(cs, s::Number) = first(InstantaneousControl(cs, s))
+instantaneous_control(cs, ss) = collect(InstantaneousControl(cs, ss))
 
 ## Waypoints (convenience methods for state propagation)
-function waypoints(f::DifferentialDynamics, x::State, c::Union{ControlInterval, ControlSequence}, dt::AbstractFloat)
-    propagate(f, x, c, 0:dt:oftype(dt, duration(c)))
+function waypoints_itr(f::DifferentialDynamics, x::State, cs, dt::AbstractFloat)
+    Propagate(f, x, cs, 0:dt:oftype(dt, duration(cs)))
 end
-function waypoints(f::DifferentialDynamics, x::State, c::Union{ControlInterval, ControlSequence}, N::Int)
-    propagate(f, x, c, range(0, stop=duration(c), length=N))
+function waypoints_itr(f::DifferentialDynamics, x::State, cs, N::Int)
+    Propagate(f, x, cs, range(0, stop=duration(cs), length=N))
 end
+waypoints(f::DifferentialDynamics, x::State, cs, dt_or_N) = collect(waypoints_itr(f, x, cs, dt_or_N))
 
 # Control Intervals
 function propagate_ode(f::DifferentialDynamics, x::State, c::ControlInterval, s::Number=duration(c); N=10)
@@ -130,8 +72,7 @@ struct StepControl{N,T,S<:StaticVector{N}} <: ControlInterval
 end
 const ZeroOrderHoldControl{N,T,S} = StepControl{N,T,S}
 duration(c::StepControl) = c.t
-zero(x::Type{StepControl{N,T,S}}) where {N,T,S} = StepControl(T(0), zeros(S))
-getindex(c::StepControl, i) = StepControl(c.t, c.u[i])
+Base.zero(::Type{StepControl{N,T,S}}) where {N,T,S} = StepControl(zero(T), zero(S))
 function propagate(f::DifferentialDynamics, x::State, c::StepControl, s::Number)
     s <= 0           ? x :
     s >= duration(c) ? propagate(f, x, c) :
@@ -151,8 +92,7 @@ end
 const FirstOrderHoldControl{N,T,S0,Sf} = RampControl{N,T,S0,Sf}
 RampControl(c::StepControl) = RampControl(c.t, c.u, c.u)
 duration(c::RampControl) = c.t
-zero(x::Type{RampControl{N,T,S0,Sf}}) where {N,T,S0,Sf} = RampControl(T(0), zeros(S0), zeros(Sf))
-getindex(c::RampControl, i) = RampControl(c.t, c.u0[i], c.uf[i])
+Base.zero(::Type{RampControl{N,T,S0,Sf}}) where {N,T,S0,Sf} = RampControl(zero(T), zero(S0), zero(Sf))
 function propagate(f::DifferentialDynamics, x::State, c::RampControl, s::Number)
     s <= 0           ? x :
     s >= duration(c) ? propagate(f, x, c) :
@@ -169,6 +109,9 @@ struct BVPControl{T,S0<:State,Sf<:State,Fx<:Function,Fu<:Function} <: ControlInt
     u::Fu
 end
 duration(c::BVPControl) = c.t
+function Base.zero(::Type{BVPControl{T,S0,Sf,Fx,Fu}}) where {T,S0,Sf,Fx,Fu}
+    BVPControl(zero(T), zero(S0), zero(Sf), Fx.instance, Fu.instance)
+end
 propagate(f::DifferentialDynamics, x::State, c::BVPControl) = (x - c.x0) + c.xf
 propagate(f::DifferentialDynamics, x::State, c::BVPControl, s::Number) = (x - c.x0) + c.x(c.x0, c.xf, c.t, s)
 instantaneous_control(c::BVPControl, s::Number) = c.u(c.x0, c.xf, c.t, s)
@@ -194,7 +137,7 @@ function SteeringBVP(dynamics::DifferentialDynamics, cost::CostFunctional;
                      cache::SteeringCache=EmptySteeringCache())
     SteeringBVP(dynamics, cost, constraints, cache)
 end
-issymmetric(bvp::SteeringBVP) = false                                         # general fallback
+LinearAlgebra.issymmetric(bvp::SteeringBVP) = false                                         # general fallback
 (bvp::SteeringBVP)(x0::State, xf::State, cost_bound::Number) = bvp(x0, xf)    # general fallback
 
 # Single Integrator
@@ -207,7 +150,7 @@ control_dim(::SingleIntegratorDynamics{N}) where {N} = N
 propagate(f::SingleIntegratorDynamics{N}, x::StaticVector{N}, c::StepControl{N}) where {N} = x + c.t*c.u
 propagate(f::SingleIntegratorDynamics{N}, x::StaticVector{N}, c::RampControl{N}) where {N} = x + c.t*(c.u0 + c.uf)/2
 
-issymmetric(bvp::SteeringBVP{<:SingleIntegratorDynamics,<:CostFunctional,<:BoundedControlNorm}) = true
+LinearAlgebra.issymmetric(bvp::SteeringBVP{<:SingleIntegratorDynamics,<:CostFunctional,<:BoundedControlNorm}) = true
 const GeometricSteering{N,T} = SteeringBVP{SingleIntegratorDynamics{N},Time,BoundedControlNorm{2,T}}
 const SingleIntegratorSteering{N,T} = GeometricSteering{N,T}
 GeometricSteering{N}(b=1) where {N} = SteeringBVP(SingleIntegratorDynamics{N}(), Time(), constraints=BoundedControlNorm(b))
