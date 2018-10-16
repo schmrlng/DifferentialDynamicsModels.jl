@@ -1,13 +1,18 @@
+# Iterator State Placeholders
+@inline _dummy_iterate_state(itr) = iterate(itr)[2]
+@inline _dummy_iterate_state(itr::Array) = 0
+@inline _dummy_iterate_state(itr::StaticArray) = (Base.OneTo(1), 0)
+@inline _dummy_iterate_state(itr::Base.Generator) = _dummy_iterate_state(itr.iter)
+@inline _dummy_iterate_state(itr::Iterators.Filter) = _dummy_iterate_state(itr.itr)
+
+@inline _dummy_iterate_result(itr) = iterate(itr)
+@inline _dummy_iterate_result(itr::AbstractArray{T}) where {T} = (zero(T), _dummy_iterate_state(itr))
+
 # ControlInterval Iteration
 @inline Base.iterate(c::ControlInterval) = (c, nothing)
 @inline Base.iterate(c::ControlInterval, ::Any) = nothing
 @inline Base.eltype(::Type{CI}) where {CI<:ControlInterval} = CI
 @inline Base.length(::ControlInterval) = 1
-
-# Iterator State Placeholders
-@inline _dummy_iterate_result(itr) = iterate(itr)
-@inline _dummy_iterate_result(itr::Array{T}) where {T} = (zero(T), 0)
-@inline _dummy_iterate_result(itr::StaticArray{S,T}) where {S,T} = (zero(T), (Base.OneTo(1), 0))
 
 # Propagate
 struct Propagate{D,S,C,T}
