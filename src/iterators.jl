@@ -1,6 +1,7 @@
 # Iterator State Placeholders
 @inline _dummy_iterate_state(itr) = iterate(itr)[2]
 @inline _dummy_iterate_state(itr::Array) = 0
+@inline _dummy_iterate_state(itr::OrdinalRange{T}) where {T} = zero(T)
 @inline _dummy_iterate_state(itr::StaticArray) = (Base.OneTo(1), 0)
 @inline _dummy_iterate_state(itr::Base.Generator) = _dummy_iterate_state(itr.iter)
 @inline _dummy_iterate_state(itr::Iterators.Filter) = _dummy_iterate_state(itr.itr)

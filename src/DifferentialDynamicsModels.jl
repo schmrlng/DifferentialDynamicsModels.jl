@@ -137,7 +137,7 @@ function SteeringBVP(dynamics::DifferentialDynamics, cost::CostFunctional;
                      cache::SteeringCache=EmptySteeringCache())
     SteeringBVP(dynamics, cost, constraints, cache)
 end
-LinearAlgebra.issymmetric(bvp::SteeringBVP) = false                                         # general fallback
+LinearAlgebra.issymmetric(bvp::SteeringBVP) = false                           # general fallback
 (bvp::SteeringBVP)(x0::State, xf::State, cost_bound::Number) = bvp(x0, xf)    # general fallback
 
 # Single Integrator
