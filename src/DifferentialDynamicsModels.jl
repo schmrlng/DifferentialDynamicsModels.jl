@@ -6,8 +6,7 @@ using StaticArrays
 export @maintain_type
 export AbstractState, State, AbstractControl, Control, DifferentialDynamics, CostFunctional
 export Time, TimePlusQuadraticControl
-export StateSequence, ControlInterval, ControlSequence
-export StepControl, RampControl, BVPControl
+export ControlInterval, StepControl, RampControl, BVPControl
 export SteeringBVP, SteeringConstraints, SteeringCache, EmptySteeringConstraints, EmptySteeringCache
 export SingleIntegratorDynamics, BoundedControlNorm, SingleIntegratorSteering, GeometricSteering
 export state_dim, control_dim, duration
@@ -16,7 +15,7 @@ export issymmetric
 
 include("utils.jl")
 
-# States, Controls, Dynamics, and Cost Functionals
+# States, Controls, Dynamics, Cost Functionals, and Control Intervals
 abstract type AbstractState end
 const State = Union{AbstractState, AbstractVector{<:Number}}
 abstract type AbstractControl end
@@ -27,18 +26,19 @@ struct Time <: CostFunctional end
 struct TimePlusQuadraticControl{Du,TR<:SMatrix{Du,Du}} <: CostFunctional
     R::TR
 end
-
-# State/Control Sequences
-const StateSequence{S} = AbstractVector{S} where {S<:State}
 abstract type ControlInterval end
-const ControlSequence{CI} = AbstractVector{CI} where {CI<:ControlInterval}
-duration(cs::ControlSequence) = sum(duration(c) for c in cs)
 Base.zero(::CI) where {CI<:ControlInterval} = zero(CI)
 
+(::Time)(c) = duration(c)
+duration(cs) = sum(duration(c) for c in cs)
+# (cost::CostFunctional)(cs) = sum(cost(c) for c in cs)    # JuliaLang/julia#29440
+(cost::TimePlusQuadraticControl)(cs) = sum(cost(c) for c in cs)
+
+# State/Control Sequences
 include("iterators.jl")
 
 ## Propagation (state as a function of time)
-propagate(f::DifferentialDynamics, x::State, cs::ControlSequence) = foldl((x, c) -> propagate(f, x, c), cs, init=x)
+propagate(f::DifferentialDynamics, x::State, cs) = foldl((x, c) -> propagate(f, x, c), cs, init=x)
 propagate(f::DifferentialDynamics, x::State, cs, s::Number) = first(Propagate(f, x, cs, s))
 propagate(f::DifferentialDynamics, x::State, cs, ss) = collect(Propagate(f, x, cs, ss))
 
