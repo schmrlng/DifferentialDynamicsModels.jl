@@ -26,6 +26,7 @@ struct Time <: CostFunctional end
 struct TimePlusQuadraticControl{Du,TR<:SMatrix{Du,Du}} <: CostFunctional
     R::TR
 end
+Base.zero(::Type{TimePlusQuadraticControl{Du,TR}}) where {Du,TR} = TimePlusQuadraticControl(zero(TR))
 abstract type ControlInterval end
 Base.zero(::CI) where {CI<:ControlInterval} = zero(CI)
 
@@ -57,8 +58,8 @@ waypoints(f::DifferentialDynamics, x::State, cs, dt_or_N) = collect(waypoints_it
 
 # Control Intervals
 function propagate_ode(f::DifferentialDynamics, x::State, c::ControlInterval, s::Number=duration(c); N=10)
-    s > 0 ? ode_rk4((y,t) -> f(y, instantaneous_control(c, t)), x, s, zero(s), N) :
-            ode_rk4((y,t) -> -f(y, instantaneous_control(c, -t)), x, -s, zero(s), N)
+    s > 0 ? ode_rk4((y, t) ->  f(y, instantaneous_control(c,  t)), x,  s, zero(s), N) :
+            ode_rk4((y, t) -> -f(y, instantaneous_control(c, -t)), x, -s, zero(s), N)
 end
 propagate(f::DifferentialDynamics, x::State, c::ControlInterval) = propagate_ode(f, x, c)    # general fallback
 
@@ -79,6 +80,7 @@ function propagate(f::DifferentialDynamics, x::State, c::StepControl, s::Number)
                        propagate(f, x, StepControl(s, c.u))
 end
 instantaneous_control(c::StepControl, s::Number) = c.u
+(cost::TimePlusQuadraticControl)(c::StepControl) = c.t*(1 + c.u'*cost.R*c.u)
 
 ## Ramp Control
 struct RampControl{N,T,S0<:StaticVector{N},Sf<:StaticVector{N}} <: ControlInterval
@@ -99,6 +101,7 @@ function propagate(f::DifferentialDynamics, x::State, c::RampControl, s::Number)
                        propagate(f, x, RampControl(s, c.u0, instantaneous_control(c, s)))
 end
 instantaneous_control(c::RampControl, s::Number) = c.u0 + (s/c.t)*(c.uf - c.u0)
+(cost::TimePlusQuadraticControl)(c::RampControl) = (Δu = c.uf - c.u0; c.t*(1 + c.u0'*cost.R*c.uf + Δu'*cost.R*Δu/3))
 
 ## BVP Control
 struct BVPControl{T,S0<:State,Sf<:State,Fx<:Function,Fu<:Function} <: ControlInterval
@@ -115,6 +118,9 @@ end
 propagate(f::DifferentialDynamics, x::State, c::BVPControl) = (x - c.x0) + c.xf
 propagate(f::DifferentialDynamics, x::State, c::BVPControl, s::Number) = (x - c.x0) + c.x(c.x0, c.xf, c.t, s)
 instantaneous_control(c::BVPControl, s::Number) = c.u(c.x0, c.xf, c.t, s)
+function (cost::TimePlusQuadraticControl)(c::BVPControl{T}; N=10) where {T}
+    c.t + ode_rk4((y, t) -> (u = instantaneous_control(c, t); u'*cost.R*u), zero(T), c.t, zero(T), N)
+end
 
 # Steering Two-Point Boundary Value Problems (BVPs)
 abstract type SteeringConstraints end
