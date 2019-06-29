@@ -43,8 +43,6 @@ function ode_rk4(fn, y0, Tf, Ti=zero(Tf), N=10)
     y
 end
 
-@inline mod2piF(x::T) where {T} = mod(x, 2*T(pi))
-@inline function adiff(x, y)
-    d = mod2piF(x - y)
-    ifelse(d <= π, d, d - 2*oftype(d, π))
-end
+@inline mod2piF(x::T) where {T} = mod(x, T(2*pi))
+@inline wrap_pi(x) = mod2piF(x + pi) - pi
+@inline adiff(x, y) = wrap_pi(x - y)
